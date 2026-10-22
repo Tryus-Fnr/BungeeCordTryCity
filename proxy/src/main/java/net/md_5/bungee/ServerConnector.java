@@ -218,6 +218,12 @@ public class ServerConnector extends PacketHandler
 
     public static void handleLogin(ProxyServer bungee, ChannelWrapper ch, UserConnection user, BungeeServerInfo target, ForgeServerHandler handshakeHandler, ServerConnection server, Login login) throws Exception
     {
+        handleLogin( bungee, ch, user, target, handshakeHandler, server, login, false );
+    }
+
+    // TryCity: seamless = Konfiguration wurde abgefangen, der Client bekommt weder Login noch Respawn
+    public static void handleLogin(ProxyServer bungee, ChannelWrapper ch, UserConnection user, BungeeServerInfo target, ForgeServerHandler handshakeHandler, ServerConnection server, Login login, boolean seamless) throws Exception
+    {
         ServerConnectedEvent event = new ServerConnectedEvent( user, server );
         bungee.getPluginManager().callEvent( event );
 
@@ -256,6 +262,13 @@ public class ServerConnector extends PacketHandler
         {
             user.getForgeClientHandler().setHandshakeComplete();
         }
+
+        if ( seamless )
+        {
+            user.getSeamless().onSeamlessLogin( login );
+            return;
+        }
+        user.getSeamless().onRealLogin( login );
 
         if ( user.getServer() == null || user.getPendingConnection().getVersion() >= ProtocolConstants.MINECRAFT_1_16 )
         {
@@ -370,18 +383,31 @@ public class ServerConnector extends PacketHandler
             return;
         }
 
+        boolean seamless = false;
         if ( user.getPendingConnection().getVersion() >= ProtocolConstants.MINECRAFT_1_20_2 )
         {
             if ( user.getServer() != null )
             {
                 if ( user.getCh().getEncodeProtocol() != Protocol.CONFIGURATION )
                 {
-                    if ( user.isBundling() )
+                    // TryCity: nahtlos versuchen, dann bleibt der Client im Spiel
+                    seamless = user.getSeamless().tryBegin( target );
+                    if ( !seamless )
                     {
-                        user.toggleBundling();
-                        user.unsafe().sendPacket( new BundleDelimiter() );
+                        if ( user.isBundling() )
+                        {
+                            user.toggleBundling();
+                            user.unsafe().sendPacket( new BundleDelimiter() );
+                        }
+                        user.unsafe().sendPacket( new StartConfiguration() );
                     }
-                    user.unsafe().sendPacket( new StartConfiguration() );
+                } else
+                {
+                    user.getSeamless().reset( "Wechsel während der Konfiguration" );
+                    if ( user.getSeamless().isActive() )
+                    {
+                        user.getSeamless().logNormalSwitch( target.getName(), "Client noch in der Konfiguration" );
+                    }
                 }
             } else
             {
@@ -407,6 +433,10 @@ public class ServerConnector extends PacketHandler
         ServerInfo from = ( user.getServer() == null ) ? null : user.getServer().getInfo();
         user.setServer( server );
         ch.getHandle().pipeline().get( HandlerBoss.class ).setHandler( new DownstreamBridge( bungee, user, server ) );
+        if ( seamless )
+        {
+            user.getSeamless().startAbsorb( server );
+        }
 
         bungee.getPluginManager().callEvent( new ServerSwitchEvent( user, from ) );
 

@@ -69,6 +69,7 @@ import net.md_5.bungee.protocol.packet.StoreCookie;
 import net.md_5.bungee.protocol.packet.SystemChat;
 import net.md_5.bungee.protocol.packet.Transfer;
 import net.md_5.bungee.protocol.util.Either;
+import net.md_5.bungee.seamless.SeamlessState;
 import net.md_5.bungee.tab.ServerUnique;
 import net.md_5.bungee.tab.TabList;
 import net.md_5.bungee.util.CaseInsensitiveSet;
@@ -163,6 +164,10 @@ public final class UserConnection implements ProxiedPlayer
     @Setter
     private ForgeServerHandler forgeServerHandler;
     /*========================================================================*/
+    // TryCity: Serverwechsel ohne Ladebildschirm
+    @Getter
+    private final SeamlessState seamless = new SeamlessState( this );
+    /*========================================================================*/
     private final Queue<DefinedPacket> packetQueue = new ArrayDeque<>();
     private final Unsafe unsafe = new Unsafe()
     {
@@ -189,6 +194,7 @@ public final class UserConnection implements ProxiedPlayer
     {
         this.entityRewrite = EntityMap.getEntityMap( getPendingConnection().getVersion() );
         this.chatSerializer = ChatSerializer.forVersion( getPendingConnection().getVersion() );
+        this.seamless.init();
 
         this.displayName = name;
 

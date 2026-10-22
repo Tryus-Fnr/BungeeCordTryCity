@@ -70,6 +70,7 @@ public class UpstreamBridge extends PacketHandler
         // We lost connection to the client
         PlayerDisconnectEvent event = new PlayerDisconnectEvent( con );
         bungee.getPluginManager().callEvent( event );
+        con.getSeamless().reset( "Spieler getrennt" );
         con.getTabListHandler().onDisconnect();
         BungeeCord.getInstance().removeConnection( con );
 
@@ -118,6 +119,14 @@ public class UpstreamBridge extends PacketHandler
         ServerConnection server = con.getServer();
         if ( server != null && server.isConnected() )
         {
+            if ( con.getSeamless().isActive() )
+            {
+                packet = con.getSeamless().onServerbound( packet );
+                if ( packet == null )
+                {
+                    return;
+                }
+            }
             EntityMap rewrite = con.getEntityRewrite();
             if ( rewrite != null && server.getCh().getEncodeProtocol() == Protocol.GAME )
             {
@@ -307,6 +316,8 @@ public class UpstreamBridge extends PacketHandler
             throw CancelSendSignal.INSTANCE;
         }
 
+        // TryCity: z. B. voicechat:request_secret für den nahtlosen Wechsel merken
+        con.getSeamless().onClientPluginMessage( pluginMessage.getTag(), pluginMessage.getData() );
         con.getPendingConnection().relayMessage( pluginMessage );
     }
 
@@ -320,10 +331,24 @@ public class UpstreamBridge extends PacketHandler
     @Override
     public void handle(StartConfiguration startConfiguration) throws Exception
     {
+        // TryCity: Bestätigung eines Rückfalls vom nahtlosen Wechsel, das Backend ist schon in der Konfiguration
+        if ( con.getSeamless().consumeFallbackAck() )
+        {
+            throw CancelSendSignal.INSTANCE;
+        }
         configureServer();
     }
 
     private void configureServer()
+    {
+        if ( configureBackend( con ) )
+        {
+            throw CancelSendSignal.INSTANCE;
+        }
+    }
+
+    // TryCity: auch vom nahtlosen Wechsel genutzt, dort ohne Bestätigung des Clients
+    public static boolean configureBackend(UserConnection con)
     {
         ChannelWrapper ch = con.getServer().getCh();
         if ( ch.getDecodeProtocol() == Protocol.LOGIN )
@@ -343,9 +368,9 @@ public class UpstreamBridge extends PacketHandler
                 ch.write( con.getPendingConnection().getBrandMessage() );
             }
             con.getServer().sendQueuedPackets();
-
-            throw CancelSendSignal.INSTANCE;
+            return true;
         }
+        return false;
     }
 
     @Override

@@ -76,6 +76,7 @@ import net.md_5.bungee.protocol.packet.ScoreboardScoreReset;
 import net.md_5.bungee.protocol.packet.ServerData;
 import net.md_5.bungee.protocol.packet.SetCompression;
 import net.md_5.bungee.protocol.packet.TabCompleteResponse;
+import net.md_5.bungee.seamless.SeamlessState;
 import net.md_5.bungee.tab.TabList;
 
 @RequiredArgsConstructor
@@ -118,6 +119,7 @@ public class DownstreamBridge extends PacketHandler
     @Override
     public void disconnected(ChannelWrapper channel) throws Exception
     {
+        con.getSeamless().onServerGone( server );
         // We lost connection to the server
         server.getInfo().removePlayer( con );
         if ( bungee.getReconnectHandler() != null )
@@ -155,6 +157,22 @@ public class DownstreamBridge extends PacketHandler
     @Override
     public void handle(PacketWrapper packet) throws Exception
     {
+        // TryCity: Serverwechsel ohne Ladebildschirm
+        SeamlessState seamless = con.getSeamless();
+        if ( seamless.isActive() )
+        {
+            if ( seamless.absorbing( server ) )
+            {
+                seamless.absorb( packet );
+                return;
+            }
+            packet = seamless.onClientbound( packet );
+            if ( packet == null )
+            {
+                return;
+            }
+        }
+
         EntityMap rewrite = con.getEntityRewrite();
         if ( rewrite != null && con.getCh().getEncodeProtocol() == Protocol.GAME )
         {
@@ -166,6 +184,12 @@ public class DownstreamBridge extends PacketHandler
     @Override
     public void handle(KeepAlive alive) throws Exception
     {
+        // TryCity: in der abgefangenen Konfiguration antwortet der Proxy selbst
+        if ( con.getSeamless().absorbing( server ) )
+        {
+            server.getCh().write( alive );
+            throw CancelSendSignal.INSTANCE;
+        }
         int timeout = bungee.getConfig().getTimeout();
         if ( timeout <= 0 || server.getKeepAlives().size() < timeout / 50 ) // Some people disable timeout, otherwise allow a theoretical maximum of 1 keepalive per tick
         {
@@ -659,6 +683,7 @@ public class DownstreamBridge extends PacketHandler
     @Override
     public void handle(Kick kick) throws Exception
     {
+        con.getSeamless().onServerGone( server );
         ServerInfo def = con.updateAndGetNextServer( server.getInfo() );
         ServerKickEvent event = bungee.getPluginManager().callEvent( new ServerKickEvent( con, server.getInfo(), new BaseComponent[]
         {
@@ -827,7 +852,7 @@ public class DownstreamBridge extends PacketHandler
         Preconditions.checkState( !receivedLogin, "Not expecting login" );
 
         receivedLogin = true;
-        ServerConnector.handleLogin( bungee, server.getCh(), con, server.getInfo(), null, server, login );
+        ServerConnector.handleLogin( bungee, server.getCh(), con, server.getInfo(), null, server, login, con.getSeamless().awaitingSeamlessLogin( server ) );
 
         throw CancelSendSignal.INSTANCE;
     }
@@ -835,6 +860,13 @@ public class DownstreamBridge extends PacketHandler
     @Override
     public void handle(FinishConfiguration finishConfiguration) throws Exception
     {
+        // TryCity: abgefangene Konfiguration abschließen oder doch normal wechseln
+        if ( con.getSeamless().absorbing( server ) )
+        {
+            con.getSeamless().absorbFinish( finishConfiguration );
+            throw CancelSendSignal.INSTANCE;
+        }
+        con.getSeamless().onRealFinishConfiguration( server );
         Runnable finish = () ->
         {
             con.unsafe().sendPacket( finishConfiguration );
@@ -856,6 +888,14 @@ public class DownstreamBridge extends PacketHandler
     @Override
     public void handle(KnownPacks knownPacks) throws Exception
     {
+        // TryCity: abgefangene Konfiguration, der Proxy antwortet an Stelle des Clients
+        if ( con.getSeamless().absorbing( server ) )
+        {
+            con.getSeamless().absorbKnownPacks( knownPacks );
+            callConfigEvent( () -> con.getSeamless().answerKnownPacks( server ) );
+            throw CancelSendSignal.INSTANCE;
+        }
+        con.getSeamless().observeKnownPacks( knownPacks );
         // call PlayerConfiguration event here.
         // For older clients its called when FinishConfiguration is received.
         callConfigEvent( () -> con.unsafe().sendPacket( knownPacks ) );

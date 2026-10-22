@@ -64,7 +64,10 @@
         <dependency>
             <groupId>org.ow2.asm</groupId>
             <artifactId>asm-commons</artifactId>
-            <version>9.11</version>
+            <!-- TryCity: festgesetzt. Der CloudNet-Wrapper (4.0.0-RC17, AsmClassReaderTransformer) schreibt
+                 den Konstruktor von ClassReader um und erzeugt mit 9.11 ungültigen Bytecode (VerifyError,
+                 kein Plugin lädt). 9.9.1 ist die Fassung der offiziellen Builds, die hier liefen. -->
+            <version>9.9.1</version>
             <scope>compile</scope>
         </dependency>
         <dependency>

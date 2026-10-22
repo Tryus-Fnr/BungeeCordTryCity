@@ -95,6 +95,24 @@ public class ServerUnique extends TabList
     }
 
     @Override
+    public void onSeamlessServerChange(UUID keep)
+    {
+        // Nur 1.19.3+ kann nahtlos wechseln
+        boolean hadKeep = uuids.remove( keep );
+        if ( !uuids.isEmpty() )
+        {
+            PlayerListItemRemove packet = new PlayerListItemRemove();
+            packet.setUuids( uuids.toArray( new UUID[ 0 ] ) );
+            player.unsafe().sendPacket( packet );
+        }
+        uuids.clear();
+        if ( hadKeep )
+        {
+            uuids.add( keep );
+        }
+    }
+
+    @Override
     public void onConnect()
     {
 

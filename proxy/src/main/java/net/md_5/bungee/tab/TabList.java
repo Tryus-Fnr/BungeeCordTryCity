@@ -1,5 +1,6 @@
 package net.md_5.bungee.tab;
 
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import net.md_5.bungee.BungeeCord;
 import net.md_5.bungee.UserConnection;
@@ -25,6 +26,12 @@ public abstract class TabList
     public abstract void onPingChange(int ping);
 
     public abstract void onServerChange();
+
+    // TryCity: nahtloser Wechsel, der eigene Eintrag muss bleiben (der Client hält ihn fest)
+    public void onSeamlessServerChange(UUID keep)
+    {
+        onServerChange();
+    }
 
     public abstract void onConnect();
 
