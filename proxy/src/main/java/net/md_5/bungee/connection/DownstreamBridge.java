@@ -19,9 +19,11 @@ import io.netty.channel.unix.DomainSocketAddress;
 import java.io.DataInput;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import net.md_5.bungee.ServerConnection;
@@ -83,6 +85,8 @@ import net.md_5.bungee.tab.TabList;
 public class DownstreamBridge extends PacketHandler
 {
 
+    // TryCity: Kind-Literal, mit dem das Backend Proxy-Befehle selbst beschreibt (TryusCloudGlobal BedrockCommandTree)
+    private static final String BACKEND_DESCRIBED = "#tryus-backend";
     // #3246: Recent versions of MinecraftForge alter Vanilla behaviour and require a command so that the executable flag is set
     // If the flag is not set, then the command will appear and successfully tab complete, but cannot be successfully executed
     private static final com.mojang.brigadier.Command DUMMY_COMMAND = (context) ->
@@ -797,9 +801,40 @@ public class DownstreamBridge extends PacketHandler
     {
         boolean modified = false;
 
+        // TryCity: Bedrock kann beim Tippen nicht den Server fragen. Für Bedrock-Spieler beschreibt das
+        // Backend deshalb auch Proxy-Befehle (/msg, /clan) mit echten Argumenten und hängt die Markierung
+        // an. Solche Knoten bleiben stehen, statt dem Platzhalter "args" zu weichen; die Markierung kommt raus.
+        Set<String> described = null;
+        for ( Object entry : commands.getRoot().getChildren() )
+        {
+            CommandNode node = (CommandNode) entry;
+            CommandNode marker = node.getChild( BACKEND_DESCRIBED );
+            if ( marker != null )
+            {
+                node.getChildren().remove( marker );
+                if ( described == null )
+                {
+                    described = new HashSet<>();
+                }
+                described.add( node.getName() );
+                modified = true;
+            }
+        }
+
         for ( Map.Entry<String, Command> command : bungee.getPluginManager().getCommands() )
         {
-            if ( !bungee.getDisabledCommands().contains( command.getKey() ) && command.getValue().hasPermission( con ) )
+            boolean usable = !bungee.getDisabledCommands().contains( command.getKey() ) && command.getValue().hasPermission( con );
+            if ( described != null && described.contains( command.getKey() ) )
+            {
+                // Ohne Recht soll der Befehl gar nicht erscheinen, wie auf Java
+                CommandNode child = commands.getRoot().getChild( command.getKey() );
+                if ( !usable && child != null )
+                {
+                    commands.getRoot().getChildren().remove( child );
+                }
+                continue;
+            }
+            if ( usable )
             {
                 boolean insertDummy = true;
 
