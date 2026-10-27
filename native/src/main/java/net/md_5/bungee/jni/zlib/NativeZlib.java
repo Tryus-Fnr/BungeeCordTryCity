@@ -50,27 +50,48 @@ public class NativeZlib implements BungeeZlib
     {
         Preconditions.checkState( ctx != 0, "Invalid pointer to compress!" );
 
-        while ( !nativeCompress.finished && ( compress || in.isReadable() ) )
+        // TryCity: zlib liest direkt aus dem Speicher. Heap-Puffer (z. B. vom Seamless-Wechsel) haben keine
+        // Adresse, memoryAddress() wirft dann UnsupportedOperationException und der Spieler fliegt. Erst umkopieren.
+        ByteBuf copy = null;
+        ByteBuf src = in;
+        if ( !in.hasMemoryAddress() )
         {
-            if ( compress )
-            {
-                out.ensureWritable( OUTPUT_BUFFER_SIZE );
-            } else
-            {
-                Preconditions.checkArgument( out.isWritable(), "Output buffer overrun" );
-            }
+            copy = out.alloc().directBuffer( in.readableBytes() );
+            copy.writeBytes( in, in.readerIndex(), in.readableBytes() );
+            src = copy;
+        }
 
-            int processed;
-            try
+        try
+        {
+            while ( !nativeCompress.finished && ( compress || src.isReadable() ) )
             {
-                processed = nativeCompress.process( ctx, in.memoryAddress() + in.readerIndex(), in.readableBytes(), out.memoryAddress() + out.writerIndex(), out.writableBytes(), compress );
-            } catch ( NativeCodeException exception )
-            {
-                throw (DataFormatException) new DataFormatException( "Failed to decompress via Zlib!" ).initCause( exception );
-            }
+                if ( compress )
+                {
+                    out.ensureWritable( OUTPUT_BUFFER_SIZE );
+                } else
+                {
+                    Preconditions.checkArgument( out.isWritable(), "Output buffer overrun" );
+                }
 
-            in.readerIndex( in.readerIndex() + nativeCompress.consumed );
-            out.writerIndex( out.writerIndex() + processed );
+                int processed;
+                try
+                {
+                    processed = nativeCompress.process( ctx, src.memoryAddress() + src.readerIndex(), src.readableBytes(), out.memoryAddress() + out.writerIndex(), out.writableBytes(), compress );
+                } catch ( NativeCodeException exception )
+                {
+                    throw (DataFormatException) new DataFormatException( "Failed to decompress via Zlib!" ).initCause( exception );
+                }
+
+                src.readerIndex( src.readerIndex() + nativeCompress.consumed );
+                out.writerIndex( out.writerIndex() + processed );
+            }
+        } finally
+        {
+            if ( copy != null )
+            {
+                in.skipBytes( copy.readerIndex() );
+                copy.release();
+            }
         }
 
         nativeCompress.reset( ctx, compress );

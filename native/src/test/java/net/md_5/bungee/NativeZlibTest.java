@@ -39,6 +39,43 @@ public class NativeZlibTest
         testExceptionImpl( new JavaZlib() );
     }
 
+    @Test
+    public void testHeapBuffer() throws DataFormatException
+    {
+        if ( NativeCode.isSupported() )
+        {
+            assertTrue( factory.load(), "Native code failed to load!" );
+            testHeapImpl( factory.newInstance() );
+        }
+        testHeapImpl( new JavaZlib() );
+    }
+
+    // TryCity: der Seamless-Wechsel schreibt Heap-Puffer, die unter Linux nativ komprimiert werden
+    private void testHeapImpl(BungeeZlib zlib) throws DataFormatException
+    {
+        System.out.println( "Testing Heap: " + zlib );
+
+        byte[] dataBuf = new byte[ 1 << 12 ];
+        new Random().nextBytes( dataBuf );
+
+        zlib.init( true, 9 );
+        ByteBuf heap = Unpooled.buffer();
+        heap.writeBytes( dataBuf );
+        ByteBuf compressed = Unpooled.directBuffer();
+        zlib.process( heap, compressed );
+        assertFalse( heap.isReadable(), "Heap input was not consumed" );
+
+        zlib.init( false, 0 );
+        ByteBuf heapCompressed = Unpooled.buffer();
+        heapCompressed.writeBytes( compressed );
+        ByteBuf uncompressed = Unpooled.directBuffer( dataBuf.length, dataBuf.length );
+        zlib.process( heapCompressed, uncompressed );
+
+        byte[] check = new byte[ uncompressed.readableBytes() ];
+        uncompressed.readBytes( check );
+        assertArrayEquals( dataBuf, check, "Results do not match" );
+    }
+
     private void test(BungeeZlib zlib) throws DataFormatException
     {
         System.out.println( "Testing: " + zlib );
