@@ -50,7 +50,10 @@ public final class SeamlessSwitch
     // Schlüssel ist das ServerInfo-Objekt selbst (Identität, schwach gehalten), nicht der Name: CloudNet legt beim
     // Start eines Dienstes ein neues an. Ein Stand von vor dem Neustart (z. B. vor einem neuen Datapack) verfällt
     // damit von allein, statt bis zum nächsten normalen Wechsel jeden Versuch zu verhindern.
-    private static final ConcurrentMap<ServerInfo, Map<Integer, ConfigFingerprint>> SERVER_FINGERPRINTS = new MapMaker().weakKeys().makeMap();
+    // Innerer Schlüssel: Protokoll des Clients + Pack-Antwort. ViaVersion auf dem Backend übersetzt die Registries je
+    // Client-Fassung; ohne Protokoll teilten sich Clients mit gleicher Pack-Antwort einen Stand, und wer die andere
+    // Fassung hatte, bekam bei jedem Wechsel "Registries dort anders" (Live-Log 28.10.2026).
+    private static final ConcurrentMap<ServerInfo, Map<String, ConfigFingerprint>> SERVER_FINGERPRINTS = new MapMaker().weakKeys().makeMap();
     //
     private static volatile boolean floodgateLooked;
     private static volatile Object floodgateApi;
@@ -65,19 +68,24 @@ public final class SeamlessSwitch
         return REPLAY_CHANNELS.contains( tag );
     }
 
-    static void rememberFingerprint(ServerInfo server, byte[] knownPacksReply, ConfigFingerprint fingerprint)
+    static void rememberFingerprint(ServerInfo server, int protocolVersion, byte[] knownPacksReply, ConfigFingerprint fingerprint)
     {
         if ( server != null && knownPacksReply != null && fingerprint != null )
         {
-            SERVER_FINGERPRINTS.computeIfAbsent( server, key -> new ConcurrentHashMap<>() ).put( Arrays.hashCode( knownPacksReply ), fingerprint );
+            SERVER_FINGERPRINTS.computeIfAbsent( server, key -> new ConcurrentHashMap<>() ).put( fingerprintKey( protocolVersion, knownPacksReply ), fingerprint );
         }
     }
 
-    // null = seit dem letzten Start dieses Servers noch nie dort konfiguriert
-    static ConfigFingerprint knownFingerprint(ServerInfo server, byte[] knownPacksReply)
+    // null = seit dem letzten Start dieses Servers noch nie mit dieser Client-Fassung dort konfiguriert
+    static ConfigFingerprint knownFingerprint(ServerInfo server, int protocolVersion, byte[] knownPacksReply)
     {
-        Map<Integer, ConfigFingerprint> known = server == null ? null : SERVER_FINGERPRINTS.get( server );
-        return known == null ? null : known.get( Arrays.hashCode( knownPacksReply ) );
+        Map<String, ConfigFingerprint> known = server == null ? null : SERVER_FINGERPRINTS.get( server );
+        return known == null ? null : known.get( fingerprintKey( protocolVersion, knownPacksReply ) );
+    }
+
+    static String fingerprintKey(int protocolVersion, byte[] knownPacksReply)
+    {
+        return protocolVersion + ":" + Arrays.hashCode( knownPacksReply );
     }
 
     // Nur für diese Protokollfassungen sind die Paketnummern unten geprüft (26.1.x und 26.2)

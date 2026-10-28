@@ -3,8 +3,11 @@ package net.md_5.bungee.seamless;
 import static org.junit.jupiter.api.Assertions.*;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import net.md_5.bungee.api.config.ServerInfo;
 import net.md_5.bungee.protocol.DefinedPacket;
+import net.md_5.bungee.protocol.ProtocolConstants;
 import net.md_5.bungee.seamless.SeamlessSwitch.Ids;
 import org.junit.jupiter.api.Test;
 
@@ -157,6 +160,36 @@ public class ConfigFingerprintTest
         b.addPacket( broken );
         assertTrue( a.sameAs( b ) );
         assertEquals( "keine Teile verschieden", a.describeDifference( b ) );
+    }
+
+    @Test
+    public void differentTagsAreNamed()
+    {
+        ConfigFingerprint a = new ConfigFingerprint();
+        a.addPacket( tags( "minecraft:block", "minecraft:logs", 5, "minecraft:leaves", 7 ) );
+        ConfigFingerprint b = new ConfigFingerprint();
+        b.addPacket( tags( "minecraft:block", "minecraft:mineable", 3, "minecraft:leaves", 8, "minecraft:logs", 5 ) );
+        assertFalse( a.sameAs( b ) );
+        assertEquals( "tags minecraft:block (minecraft:leaves, minecraft:mineable fehlt hier)", a.describeDifference( b ) );
+        assertEquals( "tags minecraft:block (minecraft:leaves, minecraft:mineable nur hier)", b.describeDifference( a ) );
+    }
+
+    @Test
+    public void fingerprintsAreKeptPerProtocol()
+    {
+        // Gleiche Pack-Antwort, andere Client-Fassung: ViaVersion schickt dann andere Registries
+        ServerInfo server = (ServerInfo) Proxy.newProxyInstance( ServerInfo.class.getClassLoader(), new Class<?>[]
+        {
+            ServerInfo.class
+        }, (proxy, method, args) -> null );
+        byte[] reply = new byte[]
+        {
+            1, 2, 3
+        };
+        ConfigFingerprint fingerprint = new ConfigFingerprint();
+        SeamlessSwitch.rememberFingerprint( server, ProtocolConstants.MINECRAFT_26_2, reply, fingerprint );
+        assertSame( fingerprint, SeamlessSwitch.knownFingerprint( server, ProtocolConstants.MINECRAFT_26_2, reply ) );
+        assertNull( SeamlessSwitch.knownFingerprint( server, ProtocolConstants.MINECRAFT_26_1, reply ) );
     }
 
     @Test

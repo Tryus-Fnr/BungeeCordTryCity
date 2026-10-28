@@ -31,7 +31,30 @@ final class ConfigFingerprint
     private final TreeMap<String, byte[]> parts = new TreeMap<>();
     // Für das Log: je Registry-Teil die Einträge in Reihenfolge mit ihrem Hash
     private final Map<String, LinkedHashMap<String, byte[]>> registryEntries = new HashMap<>();
+    // Für das Log: je Tag-Teil die Tag-Namen (sortiert) und ein kurzer Hash ihrer ID-Liste. Bewusst schmal
+    // (Arrays, Namen interned): jeder Spieler hält einen Abdruck, und allein minecraft:block hat Hunderte Tags.
+    private final Map<String, TagList> tagEntries = new HashMap<>();
     private byte[] total;
+
+    private static final class TagList
+    {
+
+        private final String[] names;
+        private final int[] hashes;
+
+        private TagList(Map<String, byte[]> tags)
+        {
+            names = new String[ tags.size() ];
+            hashes = new int[ tags.size() ];
+            int i = 0;
+            for ( Map.Entry<String, byte[]> tag : tags.entrySet() )
+            {
+                names[i] = tag.getKey().intern();
+                hashes[i] = Arrays.hashCode( tag.getValue() );
+                i++;
+            }
+        }
+    }
 
     // Rohes Konfig-Paket (mit Paketnummer)
     void addPacket(ByteBuf packet)
@@ -95,6 +118,7 @@ final class ConfigFingerprint
     private void addTags(ByteBuf buf)
     {
         Map<String, byte[]> registries = new TreeMap<>();
+        Map<String, TagList> lists = new HashMap<>();
         int registryCount = DefinedPacket.readVarInt( buf );
         for ( int r = 0; r < registryCount; r++ )
         {
@@ -122,10 +146,11 @@ final class ConfigFingerprint
                 digest.update( tag.getValue() );
             }
             registries.put( registry, digest.digest() );
+            lists.put( registry, new TagList( tags ) );
         }
         for ( Map.Entry<String, byte[]> registry : registries.entrySet() )
         {
-            put( "tags " + registry.getKey(), registry.getValue() );
+            tagEntries.put( put( "tags " + registry.getKey(), registry.getValue() ), lists.get( registry.getKey() ) );
         }
     }
 
@@ -338,7 +363,7 @@ final class ConfigFingerprint
                 differing.add( key + " (nur hier)" );
             } else if ( !Arrays.equals( mine, theirs ) )
             {
-                differing.add( registryDetail( key, other ) );
+                differing.add( tagEntries.containsKey( key ) ? tagDetail( key, other ) : registryDetail( key, other ) );
             }
         }
         if ( differing.isEmpty() )
@@ -381,6 +406,46 @@ final class ConfigFingerprint
         if ( changed.isEmpty() )
         {
             return key + " (Reihenfolge der Einträge anders)";
+        }
+        int shown = Math.min( 4, changed.size() );
+        String text = String.join( ", ", changed.subList( 0, shown ) );
+        return key + " (" + ( changed.size() > shown ? text + " +" + ( changed.size() - shown ) : text ) + ")";
+    }
+
+    // Bei Tags: welche Tags abweichen (beide Listen sind nach Namen sortiert)
+    private String tagDetail(String key, ConfigFingerprint other)
+    {
+        TagList mine = tagEntries.get( key );
+        TagList theirs = other.tagEntries.get( key );
+        if ( mine == null || theirs == null )
+        {
+            return key;
+        }
+        List<String> changed = new ArrayList<>();
+        int i = 0;
+        int j = 0;
+        while ( i < mine.names.length || j < theirs.names.length )
+        {
+            int order = i == mine.names.length ? 1 : j == theirs.names.length ? -1 : mine.names[i].compareTo( theirs.names[j] );
+            if ( order < 0 )
+            {
+                changed.add( mine.names[i++] + " nur hier" );
+            } else if ( order > 0 )
+            {
+                changed.add( theirs.names[j++] + " fehlt hier" );
+            } else
+            {
+                if ( mine.hashes[i] != theirs.hashes[j] )
+                {
+                    changed.add( mine.names[i] );
+                }
+                i++;
+                j++;
+            }
+        }
+        if ( changed.isEmpty() )
+        {
+            return key;
         }
         int shown = Math.min( 4, changed.size() );
         String text = String.join( ", ", changed.subList( 0, shown ) );

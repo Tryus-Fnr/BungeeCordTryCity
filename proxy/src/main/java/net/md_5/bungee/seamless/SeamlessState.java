@@ -150,7 +150,7 @@ public final class SeamlessState
 
         ServerConnection current = con.getServer();
         String reason = null;
-        ConfigFingerprint known = clientKnownPacksReply == null ? null : SeamlessSwitch.knownFingerprint( targetInfo, clientKnownPacksReply );
+        ConfigFingerprint known = clientKnownPacksReply == null ? null : SeamlessSwitch.knownFingerprint( targetInfo, protocol(), clientKnownPacksReply );
         if ( current == null )
         {
             reason = "kein bisheriger Server";
@@ -204,7 +204,12 @@ public final class SeamlessState
     // Eine Zeile je Wechsel, der gar nicht erst nahtlos versucht wird; sonst sieht man im Log nicht, warum
     public void logNormalSwitch(String targetName, String reason)
     {
-        SeamlessSwitch.info( con, "normaler Wechsel nach " + targetName + ": " + reason );
+        SeamlessSwitch.info( con, "normaler Wechsel nach " + targetName + " (Protokoll " + protocol() + "): " + reason );
+    }
+
+    private int protocol()
+    {
+        return con.getPendingConnection().getVersion();
     }
 
     // Nach dem Umhängen auf die DownstreamBridge: dem Backend wie der Client antworten
@@ -315,7 +320,7 @@ public final class SeamlessState
     {
         ConfigFingerprint fingerprint = configDigest;
         configDigest = null;
-        SeamlessSwitch.rememberFingerprint( target.getInfo(), clientKnownPacksReply, fingerprint );
+        SeamlessSwitch.rememberFingerprint( target.getInfo(), protocol(), clientKnownPacksReply, fingerprint );
         if ( !fingerprint.sameAs( realFingerprint ) )
         {
             fallbackReason = "Registries/Tags/Packs anders als beim letzten Server: " + fingerprint.describeDifference( realFingerprint );
@@ -404,7 +409,7 @@ public final class SeamlessState
     private void startFallback()
     {
         phase = Phase.FALLBACK;
-        SeamlessSwitch.info( con, "normaler Wechsel: " + fallbackReason );
+        SeamlessSwitch.info( con, "normaler Wechsel (Protokoll " + protocol() + "): " + fallbackReason );
         if ( con.isBundling() )
         {
             con.toggleBundling();
@@ -489,7 +494,8 @@ public final class SeamlessState
         DefinedPacket.writeVarInt( clientId, camera );
         con.getCh().write( camera );
 
-        if ( !Objects.equals( login.getDimension(), con.getDimension() ) )
+        boolean otherDimension = !Objects.equals( login.getDimension(), con.getDimension() );
+        if ( otherDimension )
         {
             // Andere Dimensionsart: der Client muss die Welt neu bauen (kurzer Ladebildschirm)
             con.unsafe().sendPacket( new Respawn( login.getDimension(), login.getWorldName(), login.getSeed(), login.getDifficulty(), login.getGameMode(), login.getPreviousGameMode(), login.getLevelType(), login.isDebug(), login.isFlat(),
@@ -538,7 +544,8 @@ public final class SeamlessState
             target.getCh().write( Unpooled.wrappedBuffer( clientChatSession.clone() ) );
         }
         replayClientMessages();
-        SeamlessSwitch.info( con, "nahtlos gewechselt nach " + target.getInfo().getName() );
+        // Mit Respawn sieht der Spieler einen kurzen Ladebildschirm; im Log nicht als "nahtlos" zählen
+        SeamlessSwitch.info( con, ( otherDimension ? "mit Respawn gewechselt (andere Dimension) nach " : "nahtlos gewechselt nach " ) + target.getInfo().getName() );
     }
 
     /*
@@ -782,7 +789,7 @@ public final class SeamlessState
         {
             realFingerprint = configDigest;
             configDigest = null;
-            SeamlessSwitch.rememberFingerprint( server.getInfo(), clientKnownPacksReply, realFingerprint );
+            SeamlessSwitch.rememberFingerprint( server.getInfo(), protocol(), clientKnownPacksReply, realFingerprint );
         }
     }
 
